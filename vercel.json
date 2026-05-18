@@ -1,6 +1,6 @@
 {
     "rewrites": [{
         "source": "/api/chat",
-        "destination": "http://47.111.15.132:8000/chat"
+        "destination": "http://127.0.0.1:8000/chat"
     }]
 }
