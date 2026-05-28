@@ -2,19 +2,24 @@
 import { ref, reactive, nextTick } from 'vue';
 import MarkdownIt from 'markdown-it';
 
-// 初始化 Markdown 解析器
 const md = new MarkdownIt();
 const chatBody = ref(null);
 
-// 初始欢迎消息
+const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+const normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/$/, '');
+const chatApiUrl = normalizedApiBaseUrl ? `${normalizedApiBaseUrl}/chat` : '/api/chat';
+
 const messages = ref([
-  { role: 'assistant', content: '你好！我是智旅通 AI 助手，有什么可以帮您的？', thinking: false, uiData: null }
+  {
+    role: 'assistant',
+    content: '你好！我是智旅通 AI 助手，有什么可以帮你的？',
+    thinking: false,
+    uiData: null
+  }
 ]);
+
 const userInput = ref('');
 
-/**
- * 自动滚动到底部
- */
 const scrollToBottom = async () => {
   await nextTick();
   if (chatBody.value) {
@@ -22,268 +27,236 @@ const scrollToBottom = async () => {
   }
 };
 
-/**
- * 解析消息内容，分离文本和 JSON UI
- */
 const parseMessageContent = (messageObj) => {
-  const fullText = messageObj.content;
-  // 匹配标记位之间的 JSON
+  const fullText = messageObj.content || '';
   const regex = /---JSON_UI_BEGIN---([\s\S]*?)---JSON_UI_END---/g;
-  
-  let match;
   const cards = [];
-  
-  // 1. 提取所有 JSON 块
+
+  let match;
   while ((match = regex.exec(fullText)) !== null) {
     try {
       cards.push(JSON.parse(match[1].trim()));
-    } catch (e) {
-      console.error("卡片 JSON 解析失败:", e);
+    } catch (error) {
+      console.error('卡片 JSON 解析失败:', error);
     }
   }
 
-  // 2. 将 UI 数据存入消息对象
-  if (cards.length > 0) {
-    messageObj.uiData = cards;
-  }
-
-  // 3. 核心步骤：移除掉原文中的 JSON 标记块，只留下纯文字给 Markdown 解析器
+  messageObj.uiData = cards.length > 0 ? cards : null;
   messageObj.content = fullText.replace(regex, '').trim();
 };
 
-/**
- * 打字机效果函数
- * @param {Object} messageObj - 响应式消息对象
- * @param {String} cleanText - 剔除 JSON 后的纯净文本
- * @param {Array|null} pendingCards - 待显示的 UI 卡片数据
- */
 const typeEffect = (messageObj, cleanText, pendingCards = null) => {
   if (!cleanText) {
     messageObj.thinking = false;
-    // 如果没有文本但有卡片，直接展示
-    if (pendingCards) messageObj.uiData = pendingCards;
+    messageObj.uiData = pendingCards;
     return;
   }
 
-  let i = 0;
-  messageObj.content = "";     // 清空思考状态提示
-  messageObj.thinking = false;  // 关闭思考动画
-  
-  // 确保打字开始前 uiData 是空的
+  let index = 0;
+  messageObj.content = '';
+  messageObj.thinking = false;
   messageObj.uiData = null;
 
   const timer = setInterval(() => {
-    if (i < cleanText.length) {
-      messageObj.content += cleanText.charAt(i);
-      i++;
-      // 仅文本更新时的滚动，性能极高，不会卡顿
+    if (index < cleanText.length) {
+      messageObj.content += cleanText.charAt(index);
+      index += 1;
       scrollToBottom();
-    } else {
-      clearInterval(timer);
-      
-      // --- 核心逻辑：文字打印完毕后，再赋值 uiData ---
-      if (pendingCards) {
-        messageObj.uiData = pendingCards;
-        
-        // 使用 nextTick 确保 DOM 更新（卡片渲染）后再执行最后一次滚动
-        nextTick(() => {
-          scrollToBottom();
-        });
-      }
+      return;
     }
-  }, 30); // 30ms 频率，保证打字流畅度
+
+    clearInterval(timer);
+    if (pendingCards) {
+      messageObj.uiData = pendingCards;
+      nextTick(() => {
+        scrollToBottom();
+      });
+    }
+  }, 30);
 };
 
-// ==================== 样式修改执行器（添加到现有代码中）====================
-
-/**
- * 执行前端样式修改指令
- * @param {string} actionStr - 格式如 "[ACTION]change_chatbox_color:black"
- * @returns {boolean} 是否成功执行
- */
 function executeStyleAction(actionStr) {
-    const match = actionStr.match(/\[ACTION\]([^:]+):?(.*)/);
-    if (!match) return false;
-    
-    const actionName = match[1];
-    const params = match[2] ? match[2].split(':') : [];
-    
-    switch(actionName) {
-        case 'change_chatbox_color':
-            changeChatboxColor(params[0]);
-            return true;
-        case 'change_chatbox_text_color':
-            changeChatboxTextColor(params[0]);
-            return true;
-        case 'reset_chatbox_style':
-            resetChatboxStyle();
-            return true;
-        default:
-            return false;
-    }
+  const match = actionStr.match(/\[ACTION\]([^:]+):?(.*)/);
+  if (!match) return false;
+
+  const actionName = match[1];
+  const params = match[2] ? match[2].split(':') : [];
+
+  switch (actionName) {
+    case 'change_chatbox_color':
+      changeChatboxColor(params[0]);
+      return true;
+    case 'change_chatbox_text_color':
+      changeChatboxTextColor(params[0]);
+      return true;
+    case 'reset_chatbox_style':
+      resetChatboxStyle();
+      return true;
+    default:
+      return false;
+  }
 }
 
-/**
- * 修改聊天框背景色
- */
 function changeChatboxColor(color) {
-    // 修改聊天窗口背景
-    const chatWindow = document.querySelector('.chat-window');
-    if (chatWindow) {
-        chatWindow.style.background = color === 'black' ? 'rgba(0,0,0,0.95)' : `rgba(${getRgbFromColor(color)}, 0.96)`;
-    }
-    
-    // 修改消息区域的背景
-    const mainScroll = document.querySelector('.main-scroll');
-    if (mainScroll) {
-        mainScroll.style.background = color === 'black' ? 'rgba(0,0,0,0.3)' : `rgba(${getRgbFromColor(color)}, 0.3)`;
-    }
-    
-    // 修改CSS变量
-    document.documentElement.style.setProperty('--chat-bg', color);
-    
-    console.log(`聊天框背景色已改为: ${color}`);
+  const chatWindow = document.querySelector('.chat-window');
+  if (chatWindow) {
+    chatWindow.style.background =
+      color === 'black' ? 'rgba(0, 0, 0, 0.95)' : `rgba(${getRgbFromColor(color)}, 0.96)`;
+  }
+
+  const mainScroll = document.querySelector('.main-scroll');
+  if (mainScroll) {
+    mainScroll.style.background =
+      color === 'black' ? 'rgba(0, 0, 0, 0.3)' : `rgba(${getRgbFromColor(color)}, 0.3)`;
+  }
+
+  document.documentElement.style.setProperty('--chat-bg', color);
 }
 
-/**
- * 修改聊天框文字颜色
- */
 function changeChatboxTextColor(color) {
-    const bubbles = document.querySelectorAll('.assistant .bubble');
-    bubbles.forEach(bubble => {
-        bubble.style.color = color;
-    });
-    document.documentElement.style.setProperty('--chat-text', color);
-    console.log(`文字颜色已改为: ${color}`);
+  const bubbles = document.querySelectorAll('.assistant .bubble');
+  bubbles.forEach((bubble) => {
+    bubble.style.color = color;
+  });
+  document.documentElement.style.setProperty('--chat-text', color);
 }
 
-/**
- * 重置聊天框样式
- */
 function resetChatboxStyle() {
-    const chatWindow = document.querySelector('.chat-window');
-    if (chatWindow) {
-        chatWindow.style.background = 'rgba(255, 255, 255, 0.96)';
-    }
-    
-    const mainScroll = document.querySelector('.main-scroll');
-    if (mainScroll) {
-        mainScroll.style.background = 'rgba(249, 251, 255, 0.5)';
-    }
-    
-    const bubbles = document.querySelectorAll('.assistant .bubble');
-    bubbles.forEach(bubble => {
-        bubble.style.color = '#333';
-    });
-    
-    document.documentElement.style.setProperty('--chat-bg', 'rgba(249, 251, 255, 0.5)');
-    document.documentElement.style.setProperty('--chat-text', '#333');
-    
-    console.log('聊天框样式已重置');
+  const chatWindow = document.querySelector('.chat-window');
+  if (chatWindow) {
+    chatWindow.style.background = 'rgba(255, 255, 255, 0.96)';
+  }
+
+  const mainScroll = document.querySelector('.main-scroll');
+  if (mainScroll) {
+    mainScroll.style.background = 'rgba(249, 251, 255, 0.5)';
+  }
+
+  const bubbles = document.querySelectorAll('.assistant .bubble');
+  bubbles.forEach((bubble) => {
+    bubble.style.color = '#333';
+  });
+
+  document.documentElement.style.setProperty('--chat-bg', 'rgba(249, 251, 255, 0.5)');
+  document.documentElement.style.setProperty('--chat-text', '#333');
 }
 
-/**
- * 颜色名称转RGB值（辅助函数）
- */
 function getRgbFromColor(color) {
-    const colorMap = {
-        'black': '0,0,0',
-        'white': '255,255,255',
-        'red': '255,0,0',
-        'blue': '0,0,255',
-        'green': '0,255,0',
-        'yellow': '255,255,0',
-        'purple': '128,0,128',
-        'pink': '255,192,203'
-    };
-    return colorMap[color] || '255,255,255';
+  const colorMap = {
+    black: '0,0,0',
+    white: '255,255,255',
+    red: '255,0,0',
+    blue: '0,0,255',
+    green: '0,255,0',
+    yellow: '255,255,0',
+    purple: '128,0,128',
+    pink: '255,192,203'
+  };
+  return colorMap[color] || '255,255,255';
 }
-/**
- * 发送消息并处理响应
- */
-const sendMessage = async () => {
-  if (!userInput.value) return;
 
-  const currentPrompt = userInput.value;
-  // 1. 添加用户消息
+const sendMessage = async () => {
+  if (!userInput.value.trim()) return;
+
+  const currentPrompt = userInput.value.trim();
   messages.value.push({ role: 'user', content: currentPrompt });
   userInput.value = '';
-  
-  // 2. 添加 AI 占位消息
-  const assistantMsg = reactive({ 
-    role: 'assistant', 
-    content: '', 
+
+  const assistantMsg = reactive({
+    role: 'assistant',
+    content: '',
     thinking: true,
-    uiData: null 
+    uiData: null
   });
   messages.value.push(assistantMsg);
   await scrollToBottom();
 
+  const finishAssistantMessage = (rawText) => {
+    if (!rawText) {
+      assistantMsg.thinking = false;
+      assistantMsg.content = '未收到后端返回内容，请检查接口返回格式。';
+      return;
+    }
+
+    if (rawText.includes('[ACTION]')) {
+      executeStyleAction(rawText);
+      const isPureAction = rawText.trim().match(/^\[ACTION[^\]]+\](?::[^:]+)?$/);
+      if (isPureAction) {
+        assistantMsg.thinking = false;
+        assistantMsg.content = '';
+        scrollToBottom();
+        return;
+      }
+    }
+
+    const tempProcessor = { content: rawText, uiData: null };
+    parseMessageContent(tempProcessor);
+    typeEffect(assistantMsg, tempProcessor.content, tempProcessor.uiData);
+  };
+
   try {
-    const response = await fetch('/api/chat', {
+    const response = await fetch(chatApiUrl, {
       method: 'POST',
-      body: JSON.stringify({ prompt: currentPrompt }),
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: currentPrompt })
     });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const isSse = contentType.includes('text/event-stream');
+
+    if (!response.body || !response.body.getReader || !isSse) {
+      const fallbackText = await response.text();
+      try {
+        const jsonData = JSON.parse(fallbackText);
+        finishAssistantMessage(jsonData.content || jsonData.message || fallbackText);
+      } catch {
+        finishAssistantMessage(fallbackText);
+      }
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let finalContent = "";
+    let finalContent = '';
+    let handledDone = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
+      const chunk = decoder.decode(value, { stream: true });
       const lines = chunk.split('\n');
-      
-      lines.forEach(line => {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.content) {
-              finalContent = data.content;
-            }
-            
-            // 当后端传输结束时进行处理
-            if (data.status === "done") {
-              const rawText = data.content || finalContent;
-                console.log("===== 后端返回原始内容 =====");
-  console.log(rawText);
-  console.log("============================");
-              // 🔥 新增：检查是否包含样式修改指令
-              if (rawText && rawText.includes('[ACTION]')) {
-                // 执行样式修改
-                executeStyleAction(rawText);
-                
-                // 如果是纯指令（没有其他文本内容），直接结束
-                const isPureAction = rawText.trim().match(/^\[ACTION[^\]]+\](?::[^:]+)?$/);
-                if (isPureAction) {
-                  assistantMsg.thinking = false;
-                  assistantMsg.content = '';
-                   scrollToBottom();
-                  return;
-                }
-              }
-              
-              // 使用临时对象进行解析，避免直接修改 assistantMsg 触发提前渲染
-              const tempProcessor = { content: rawText, uiData: null };
-              parseMessageContent(tempProcessor); 
 
-              // 关键：将解析出的 content 和 uiData 传给 typeEffect
-              // 此时 assistantMsg.uiData 依然是 null，卡片不会显示
-              typeEffect(assistantMsg, tempProcessor.content, tempProcessor.uiData);
-            }
-          } catch (e) {
-            console.error("解析数据包失败:", e);
+      lines.forEach((line) => {
+        if (!line.startsWith('data: ')) return;
+
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.content) {
+            finalContent = data.content;
           }
+
+          if (data.status === 'done') {
+            handledDone = true;
+            finishAssistantMessage(data.content || finalContent);
+          }
+        } catch (error) {
+          console.error('解析数据包失败:', error);
         }
       });
     }
-  } catch (e) {
+
+    if (!handledDone) {
+      finishAssistantMessage(finalContent);
+    }
+  } catch (error) {
     assistantMsg.thinking = false;
-    assistantMsg.content = "⚠️ 连接失败，请检查后端服务是否启动。";
-    console.error("Fetch Error:", e);
+    assistantMsg.content = `连接失败，请检查接口地址或后端返回格式。${error.message ? ` (${error.message})` : ''}`;
+    console.error('Fetch Error:', error);
   }
 };
 </script>
@@ -292,20 +265,21 @@ const sendMessage = async () => {
   <div class="app-container">
     <div class="bg-decoration top-left"></div>
     <div class="bg-decoration bottom-right"></div>
-  
+
     <div class="inspiration-sidebar">
       <div class="section-title">
         <span class="icon">✨</span>
         <span>探索灵感</span>
       </div>
       <div class="tag-cloud">
-        <div class="tag-card" @click="userInput = '推荐一个南昌适合看日落的地方'">🌅 南昌日落</div>
-        <div class="tag-card" @click="userInput = '武功山两天一夜攻略'">⛰️ 武功山攻略</div>
-        <div class="tag-card" @click="userInput = '景德镇御窑厂怎么玩？'">🏺 景德镇陶瓷</div>
-        <div class="tag-card" @click="userInput = '婺源现在油菜花开了吗？'">🌼 婺源花海</div>
-        <div class="tag-card" @click="userInput = '江西有哪些不累的避暑胜地？'">🍃 避暑不累</div>
+        <div class="tag-card" @click="userInput = '推荐一个南昌适合看日落的地方'">南昌日落</div>
+        <div class="tag-card" @click="userInput = '武功山两天一夜攻略'">武功山攻略</div>
+        <div class="tag-card" @click="userInput = '景德镇陶瓷厂怎么玩？'">景德镇陶瓷</div>
+        <div class="tag-card" @click="userInput = '婺源现在油菜花开了吗？'">婺源花海</div>
+        <div class="tag-card" @click="userInput = '江西有哪些不累的避暑胜地？'">轻松避暑</div>
       </div>
     </div>
+
     <div class="chat-window">
       <header class="header">
         <div class="header-info">
@@ -316,21 +290,27 @@ const sendMessage = async () => {
           </div>
         </div>
       </header>
-      <main class="main-scroll" ref="chatBody">
+
+      <main ref="chatBody" class="main-scroll">
         <div v-for="(msg, i) in messages" :key="i" :class="['message-row', msg.role]">
-          <div v-if="msg.role === 'assistant'" class="avatar assistant-avatar">🤖</div>
+          <div v-if="msg.role === 'assistant'" class="avatar assistant-avatar">AI</div>
+
           <div class="bubble-container">
             <div class="bubble">
               <div v-if="msg.role === 'assistant' && msg.thinking" class="thinking-bubble">
-                <span>正在为您规划行程</span>
-                <div class="dot-ani"></div><div class="dot-ani"></div><div class="dot-ani"></div>
+                <span>正在为你规划行程</span>
+                <div class="dot-ani"></div>
+                <div class="dot-ani"></div>
+                <div class="dot-ani"></div>
               </div>
+
               <div v-else class="markdown-body" v-html="md.render(msg.content)"></div>
+
               <div v-if="msg.uiData && msg.uiData.length > 0" class="ui-cards-wrapper">
                 <div v-for="(card, index) in msg.uiData" :key="index" class="card-item">
                   <div v-if="card.type === 'scenery-card'" class="scenery-card">
                     <div class="card-image">
-                      <img :src="card.data.image" alt="风景图" @load="scrollToBottom" />
+                      <img :src="card.data.image" :alt="card.data.name" @load="scrollToBottom" />
                     </div>
                     <div class="card-body">
                       <h4 class="card-name">{{ card.data.name }}</h4>
@@ -344,74 +324,90 @@ const sendMessage = async () => {
               </div>
             </div>
           </div>
-          <div v-if="msg.role === 'user'" class="avatar user-avatar">👤</div>
+
+          <div v-if="msg.role === 'user'" class="avatar user-avatar">我</div>
         </div>
       </main>
+
       <footer class="footer">
         <div class="input-wrapper">
-          <input v-model="userInput" @keyup.enter="sendMessage" placeholder="输入目的地，开启江西之旅..." />
-          <button class="send-btn" @click="sendMessage" :disabled="!userInput">发送</button>
+          <input
+            v-model="userInput"
+            placeholder="输入目的地，开启你的江西之旅..."
+            @keyup.enter="sendMessage"
+          />
+          <button class="send-btn" :disabled="!userInput.trim()" @click="sendMessage">发送</button>
         </div>
       </footer>
     </div>
   </div>
 </template>
+
 <style scoped>
-/* 1. 顶层容器：确保背景色和渐变全屏铺满，锁定视口 */
 .app-container {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  /* 江西山水意境的天青色渐变 */
-  background: #f0f4f8 linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 0;
-  padding: 0;
   overflow: hidden;
+  background: #f0f4f8 linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
   font-family: "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
-/* 2. 背景装饰球：使用 pointer-events: none 确保不阻挡点击操作 */
 .bg-decoration {
   position: absolute;
+  z-index: 0;
   border-radius: 50%;
   filter: blur(80px);
   opacity: 0.3;
-  z-index: 0;
-  pointer-events: none; /* 允许点击穿透到下层按钮 */
+  pointer-events: none;
 }
-.top-left { width: 400px; height: 400px; background: #1890ff; top: -10%; left: -5%; }
-.bottom-right { width: 500px; height: 500px; background: #52c41a; bottom: -10%; right: -5%; }
 
-/* 3. 左侧灵感探索区 */
+.top-left {
+  top: -10%;
+  left: -5%;
+  width: 400px;
+  height: 400px;
+  background: #1890ff;
+}
+
+.bottom-right {
+  right: -5%;
+  bottom: -10%;
+  width: 500px;
+  height: 500px;
+  background: #52c41a;
+}
+
 .inspiration-sidebar {
   position: absolute;
-  left: 40px;
   top: 20%;
-  width: 200px;
+  left: 40px;
   z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 15px;
+  width: 200px;
 }
 
-/* 窄屏适配：屏幕宽度小于 1150px 时隐藏侧边栏，保证对话框居中 */
 @media (max-width: 1150px) {
-  .inspiration-sidebar { display: none; }
+  .inspiration-sidebar {
+    display: none;
+  }
 }
 
 .section-title {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 5px;
+  font-size: 16px;
   font-weight: 600;
   color: #2c3e50;
-  font-size: 16px;
-  margin-bottom: 5px;
 }
 
 .tag-cloud {
@@ -421,60 +417,81 @@ const sendMessage = async () => {
 }
 
 .tag-card {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
   padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: 12px;
-  font-size: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
   color: #555;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+  backdrop-filter: blur(10px);
   transition: all 0.3s ease;
 }
 
 .tag-card:hover {
-  background: #fff;
   transform: translateX(10px);
-  color: #1890ff;
   border-color: #1890ff;
+  background: #fff;
   box-shadow: 0 8px 15px rgba(24, 144, 255, 0.1);
+  color: #1890ff;
 }
 
-/* 4. 聊天主窗口：玻璃拟态效果 */
 .chat-window {
   position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
   width: 90%;
   max-width: 850px;
   height: 85vh;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(20px);
-  display: flex;
-  flex-direction: column;
-  border-radius: 24px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.12);
-  z-index: 20;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(20px);
 }
 
-/* 顶部标题栏 */
 .header {
-  height: 70px;
-  padding: 0 25px;
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  height: 70px;
+  padding: 0 25px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fff;
 }
-.header-info { display: flex; align-items: center; gap: 12px; }
-.status-dot { width: 10px; height: 10px; background: #52c41a; border-radius: 50%; box-shadow: 0 0 8px #52c41a; }
-.title-group { display: flex; flex-direction: column; }
-.main-title { font-size: 17px; color: #333; font-weight: 600; }
-.sub-title { font-size: 12px; color: #999; }
 
-/* 5. 消息列表区域 */
+.header-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #52c41a;
+  box-shadow: 0 0 8px #52c41a;
+}
+
+.title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.main-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #333;
+}
+
+.sub-title {
+  font-size: 12px;
+  color: #999;
+}
+
 .main-scroll {
   flex: 1;
   overflow-y: auto;
@@ -483,34 +500,47 @@ const sendMessage = async () => {
   scroll-behavior: smooth;
 }
 
-/* 消息行布局：确保头像与气泡水平排列 */
 .message-row {
   display: flex;
+  align-items: flex-start;
   margin-bottom: 20px;
-  align-items: flex-start; /* 顶部对齐 */
   animation: fadeIn 0.4s ease;
 }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-.message-row.user { justify-content: flex-end; }
-.message-row.assistant { justify-content: flex-start; }
+.message-row.user {
+  justify-content: flex-end;
+}
 
-/* 头像样式 */
+.message-row.assistant {
+  justify-content: flex-start;
+}
+
 .avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
   display: flex;
   justify-content: center;
   align-items: center;
-  font-size: 20px;
   flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 600;
 }
-.assistant-avatar { background: #e6f7ff; margin-right: 12px; }
-.user-avatar { background: #f0f0f0; margin-left: 12px; }
 
-/* 气泡样式 */
-.bubble-container { max-width: 75%; }
+.assistant-avatar {
+  margin-right: 12px;
+  background: #e6f7ff;
+}
+
+.user-avatar {
+  margin-left: 12px;
+  background: #f0f0f0;
+}
+
+.bubble-container {
+  max-width: 75%;
+}
+
 .bubble {
   padding: 12px 18px;
   border-radius: 16px;
@@ -518,231 +548,125 @@ const sendMessage = async () => {
   line-height: 1.6;
   word-wrap: break-word;
 }
+
 .assistant .bubble {
-  background: #fff;
   border: 1px solid #ebedf0;
-  color: #333;
   border-top-left-radius: 4px;
+  background: #fff;
+  color: #333;
 }
+
 .user .bubble {
-  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
-  color: #fff;
   border-top-right-radius: 4px;
+  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
   box-shadow: 0 4px 12px rgba(24, 144, 255, 0.2);
+  color: #fff;
 }
 
-/* 6. 思考中动画 */
-.thinking-bubble { display: flex; align-items: center; gap: 6px; color: #1890ff; font-weight: 500; }
-.dot-ani { width: 6px; height: 6px; background: #1890ff; border-radius: 50%; animation: dotFlash 1.4s infinite; }
-.dot-ani:nth-child(2) { animation-delay: 0.2s; }
-.dot-ani:nth-child(3) { animation-delay: 0.4s; }
+.thinking-bubble {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #1890ff;
+  font-weight: 500;
+}
 
-@keyframes dotFlash { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+.dot-ani {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #1890ff;
+  animation: dotFlash 1.4s infinite;
+}
 
-/* 7. 底部输入区域 */
+.dot-ani:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot-ani:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
 .footer {
   padding: 20px 25px;
-  background: #fff;
   border-top: 1px solid #f0f0f0;
+  background: #fff;
 }
+
 .input-wrapper {
   display: flex;
-  background: #f4f5f7;
+  align-items: center;
   padding: 8px 8px 8px 20px;
   border-radius: 30px;
-  align-items: center;
+  background: #f4f5f7;
   transition: all 0.3s;
 }
+
 .input-wrapper:focus-within {
   background: #fff;
   box-shadow: 0 0 0 2px #1890ff;
 }
+
 input {
   flex: 1;
-  background: transparent;
   border: none;
   outline: none;
+  background: transparent;
   font-size: 15px;
   color: #333;
 }
+
 .send-btn {
-  background: #1890ff;
-  color: #fff;
-  border: none;
   height: 40px;
   padding: 0 22px;
+  border: none;
   border-radius: 20px;
+  background: #1890ff;
+  color: #fff;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
-.send-btn:hover { background: #40a9ff; transform: scale(1.05); }
-.send-btn:disabled { background: #bfbfbf; transform: none; cursor: not-allowed; }
 
-/* 滚动条美化 */
-.main-scroll::-webkit-scrollbar { width: 6px; }
-.main-scroll::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 10px; }
-.main-scroll::-webkit-scrollbar-track { background: transparent; }
-
-/* 平板设备 (768px - 1024px) */
-@media (max-width: 1024px) {
-  .chat-window {
-    width: 95%;
-    height: 90vh;
-  }
-  
-  .bubble-container {
-    max-width: 85%;
-  }
-  
-  .inspiration-sidebar {
-    left: 20px;
-    width: 180px;
-  }
- 
+.send-btn:hover {
+  background: #40a9ff;
+  transform: scale(1.05);
 }
 
-/* 手机设备 (小于 768px) */
-@media (max-width: 768px) {
-/* 1. 让背景装饰球消失，节省手机性能 */
-  .bg-decoration {
-    display: none;
-  }
-
-  /* 2. 让外层容器不再居中对齐，而是直接撑满 */
-  .app-container {
-    align-items: flex-start; /* 顶部对齐 */
-    background: #fff;        /* 手机端直接用纯白背景，视觉更清爽 */
-  }
-/* 3. 核心：让聊天窗口变身“全屏 App” */
-  .chat-window {
-    width: 100% !important;
-    max-width: none !important;
-    height: 100vh !important; /* 占据全高 */
-    height: 100dvh !important; /* 适配移动端浏览器地址栏伸缩 (Dynamic Viewport) */
-    border-radius: 0 !important; /* 去掉大圆角 */
-    box-shadow: none !important; /* 去掉外阴影 */
-    border: none !important;     /* 去掉外边框 */
-  }
-  
-  /* 4. 调整页眉，增加沉浸感 */
-  .header {
-    height: 60px;
-    padding: 0 15px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
-  }
-  
-  .main-title {
-    font-size: 15px;
-  }
-  
-  .sub-title {
-    font-size: 10px;
-  }
-  
-  .main-scroll {
-    padding: 16px;
-  }
-  
-  .avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 16px;
-  }
-  
-  .bubble {
-    padding: 8px 12px;
-    font-size: 14px;
-  }
-  
-  .bubble-container {
-    max-width: 90%;
-  }
-  
-  /* 5. 调整底部输入框，确保其在手机输入法弹出时不被遮挡 */
-  .footer {
-    padding: 10px 15px env(safe-area-inset-bottom); /* 适配 iPhone 底部“小横条” */
-    background: #fff;
-  }
-  .input-wrapper {
-    padding: 4px 4px 4px 16px;
-  }
-  
-  input {
-    font-size: 12px !important; /* 强制 16px 防止 iOS 自动缩放 */
-  }
-  
-  .send-btn {
-    height: 36px;
-    padding: 0 16px;
-    font-size: 14px;
-  }
-  
-  .tag-card {
-    padding: 8px 12px;
-    font-size: 12px;
-  }
- 
-  .card-image {
-    height: 140px; /* 适当减小图片高度 */
-  }
-
+.send-btn:disabled {
+  background: #bfbfbf;
+  cursor: not-allowed;
+  transform: none;
 }
 
-/* 超小手机 (小于 480px) */
-@media (max-width: 480px) {
-  .bubble-container {
-    max-width: 95%;
-  }
-  
-  .message-row {
-    margin-bottom: 12px;
-  }
-  
-  .avatar {
-    width: 28px;
-    height: 28px;
-    font-size: 14px;
-  }
-  
-  .bubble {
-    padding: 6px 10px;
-    font-size: 13px;
-  }
-  
-  .tag-card {
-    padding: 6px 10px;
-    font-size: 11px;
-  }
-  input {
-    font-size: 11px;  /* 从 14px 改为 12px */
-  }
+.main-scroll::-webkit-scrollbar {
+  width: 6px;
 }
 
-/* 卡片容器外间距：与 Markdown 文字拉开距离 */
+.main-scroll::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: #e0e0e0;
+}
+
+.main-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .ui-cards-wrapper {
-  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 15px;
-  /* 卡片进入时的渐显动画 */
+  margin-top: 14px;
   animation: cardSlideUp 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
 
-@keyframes cardSlideUp {
-  from { opacity: 0; transform: translateY(15px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* 风景卡片主体 */
 .scenery-card {
-  background: #ffffff;
-  border-radius: 18px;
-  overflow: hidden;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(0, 0, 0, 0.04);
   max-width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
   transition: all 0.3s ease;
 }
 
@@ -751,42 +675,39 @@ input {
   box-shadow: 0 15px 35px rgba(24, 144, 255, 0.1);
 }
 
-/* 图片区域 */
 .card-image {
+  position: relative;
   width: 100%;
   height: 190px;
   overflow: hidden;
   background: #f0f2f5;
-  position: relative;
 }
 
 .card-image img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
   transition: transform 0.5s ease;
 }
 
 .scenery-card:hover .card-image img {
-  transform: scale(1.08); /* 悬停时图片轻微放大，增加生动感 */
+  transform: scale(1.08);
 }
 
-/* 卡片内容文字区 */
 .card-body {
   padding: 16px;
   text-align: left;
 }
 
 .card-name {
-  margin: 0 0 10px 0;
+  margin: 0 0 10px;
+  color: #262626;
   font-size: 18px;
   font-weight: 600;
-  color: #262626;
   letter-spacing: 0.5px;
 }
 
-/* 标签组 */
 .card-tags {
   display: flex;
   flex-wrap: wrap;
@@ -795,88 +716,189 @@ input {
 }
 
 .tag-item {
+  padding: 4px 10px;
+  border: 1px solid #bae7ff;
+  border-radius: 6px;
   background: #e6f7ff;
   color: #1890ff;
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
   font-weight: 500;
-  border: 1px solid #bae7ff;
 }
 
-/* 描述文本 */
 .card-desc {
-  font-size: 14px;
-  color: #595959;
-  line-height: 1.6;
   margin: 0;
+  color: #595959;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
-/* 适配手机端：缩小卡片图片高度 */
+@media (max-width: 1024px) {
+  .chat-window {
+    width: 95%;
+    height: 90vh;
+  }
+
+  .bubble-container {
+    max-width: 85%;
+  }
+
+  .inspiration-sidebar {
+    left: 20px;
+    width: 180px;
+  }
+}
+
 @media (max-width: 768px) {
+  .bg-decoration {
+    display: none;
+  }
+
+  .app-container {
+    align-items: flex-start;
+    background: #fff;
+  }
+
+  .chat-window {
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .header {
+    height: 60px;
+    padding: 0 15px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+  }
+
+  .main-title {
+    font-size: 15px;
+  }
+
+  .sub-title {
+    font-size: 10px;
+  }
+
+  .main-scroll {
+    padding: 16px;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+  }
+
+  .bubble {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  .bubble-container {
+    max-width: 90%;
+  }
+
+  .footer {
+    padding: 10px 15px env(safe-area-inset-bottom);
+  }
+
+  .input-wrapper {
+    padding: 4px 4px 4px 16px;
+  }
+
+  input {
+    font-size: 12px;
+  }
+
+  .send-btn {
+    height: 36px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .tag-card {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
   .card-image {
     height: 150px;
   }
+
   .card-name {
     font-size: 16px;
   }
+
   .card-desc {
     font-size: 13px;
   }
 }
 
-/* 修正 Markdown 内容的行间距，避免与卡片太近 */
-.markdown-content :last-child {
-  margin-bottom: 0;
+@media (max-width: 480px) {
+  .bubble-container {
+    max-width: 95%;
+  }
+
+  .message-row {
+    margin-bottom: 12px;
+  }
+
+  .avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .bubble {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .tag-card {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  input {
+    font-size: 11px;
+  }
 }
-.app-container {
-  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: #f0f4f8 linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
-  display: flex; justify-content: center; align-items: center; overflow: hidden;
-  font-family: "PingFang SC", sans-serif;
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.bg-decoration { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.3; pointer-events: none; }
-.top-left { width: 400px; height: 400px; background: #1890ff; top: -10%; left: -5%; }
-.bottom-right { width: 500px; height: 500px; background: #52c41a; bottom: -10%; right: -5%; }
 
-.inspiration-sidebar { position: absolute; left: 40px; top: 20%; width: 200px; z-index: 10; display: flex; flex-direction: column; gap: 15px; }
-@media (max-width: 1150px) { .inspiration-sidebar { display: none; } }
+@keyframes dotFlash {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
 
-.tag-card { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); padding: 12px 16px; border-radius: 12px; cursor: pointer; transition: all 0.3s ease; border: 1px solid rgba(255, 255, 255, 0.5); }
-.tag-card:hover { transform: translateX(10px); color: #1890ff; border-color: #1890ff; }
+  50% {
+    opacity: 1;
+  }
+}
 
-.chat-window { position: relative; width: 90%; max-width: 850px; height: 85vh; background: rgba(255, 255, 255, 0.96); border-radius: 24px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.12); }
-.header { height: 70px; padding: 0 25px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; }
-.status-dot { width: 10px; height: 10px; background: #52c41a; border-radius: 50%; }
+@keyframes cardSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
 
-.main-scroll { flex: 1; overflow-y: auto; padding: 25px; background: rgba(249, 251, 255, 0.5); }
-.message-row { display: flex; margin-bottom: 20px; animation: fadeIn 0.4s ease; }
-.message-row.user { justify-content: flex-end; }
-.bubble { padding: 12px 18px; border-radius: 16px; font-size: 15px; line-height: 1.6; max-width: 100%; }
-.assistant .bubble { background: #fff; border: 1px solid #ebedf0; border-top-left-radius: 4px; }
-.user .bubble { background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: #fff; border-top-right-radius: 4px; }
-
-.avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; }
-.assistant-avatar { background: #e6f7ff; margin-right: 12px; }
-.user-avatar { background: #f0f0f0; margin-left: 12px; }
-
-.footer { padding: 20px 25px; border-top: 1px solid #f0f0f0; }
-.input-wrapper { display: flex; background: #f4f5f7; padding: 8px 20px; border-radius: 30px; align-items: center; }
-input { flex: 1; border: none; background: transparent; outline: none; }
-.send-btn { background: #1890ff; color: #fff; border: none; padding: 10px 22px; border-radius: 20px; cursor: pointer; }
-
-/* 💡 新增卡片样式 */
-.ui-cards-wrapper { margin-top: 14px; display: flex; flex-direction: column; gap: 15px; animation: cardSlideUp 0.5s ease; }
-@keyframes cardSlideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-
-.scenery-card { background: #fff; border-radius: 18px; overflow: hidden; border: 1px solid #f0f0f0; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
-.card-image { width: 100%; height: 190px; }
-.card-image img { width: 100%; height: 100%; object-fit: cover; }
-.card-body { padding: 16px; text-align: left; }
-.card-name { margin-bottom: 8px; font-size: 18px; color: #262626; }
-.card-tags { display: flex; gap: 8px; margin-bottom: 10px; }
-.tag-item { background: #e6f7ff; color: #1890ff; font-size: 12px; padding: 4px 10px; border-radius: 6px; }
-.card-desc { font-size: 14px; color: #595959; }
-
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 </style>
