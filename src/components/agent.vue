@@ -7,12 +7,35 @@ const chatBody = ref(null);
 
 const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
 const normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/$/, '');
-const chatApiUrl = normalizedApiBaseUrl ? `${normalizedApiBaseUrl}/chat` : '/api/chat';
+const isBrowser = typeof window !== 'undefined';
+const isLocalPreview =
+  !isBrowser || ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const chatApiUrl = normalizedApiBaseUrl
+  ? `${normalizedApiBaseUrl}/chat`
+  : isLocalPreview
+    ? '/api/chat'
+    : '';
+
+const quickQuestions = [
+  '我的订单还没收到，怎么查询物流进度？',
+  '商品有质量问题，如何申请退换货？',
+  '设备不会连接网络，应该怎么排查？',
+  '保修期多久，需要准备哪些售后凭证？',
+  '发票开错了，能重新申请吗？',
+  '人工客服什么时候在线？'
+];
+
+const servicePromises = [
+  { label: '7 x 12 在线答疑', desc: '常见售后问题快速响应' },
+  { label: '退换流程指引', desc: '一步步说明申请和审核流程' },
+  { label: '故障排查建议', desc: '优先帮助用户先定位问题' }
+];
 
 const messages = ref([
   {
     role: 'assistant',
-    content: '你好！我是智旅通 AI 助手，有什么可以帮你的？',
+    content:
+      '你好，我是售后问答助手，可以帮你处理物流查询、退换货、保修说明、故障排查和发票问题。请直接描述你遇到的情况。',
     thinking: false,
     uiData: null
   }
@@ -72,7 +95,7 @@ const typeEffect = (messageObj, cleanText, pendingCards = null) => {
         scrollToBottom();
       });
     }
-  }, 30);
+  }, 24);
 };
 
 function executeStyleAction(actionStr) {
@@ -98,16 +121,16 @@ function executeStyleAction(actionStr) {
 }
 
 function changeChatboxColor(color) {
-  const chatWindow = document.querySelector('.chat-window');
+  const chatWindow = document.querySelector('.chat-shell');
   if (chatWindow) {
     chatWindow.style.background =
-      color === 'black' ? 'rgba(0, 0, 0, 0.95)' : `rgba(${getRgbFromColor(color)}, 0.96)`;
+      color === 'black' ? 'rgba(10, 18, 32, 0.96)' : `rgba(${getRgbFromColor(color)}, 0.96)`;
   }
 
   const mainScroll = document.querySelector('.main-scroll');
   if (mainScroll) {
     mainScroll.style.background =
-      color === 'black' ? 'rgba(0, 0, 0, 0.3)' : `rgba(${getRgbFromColor(color)}, 0.3)`;
+      color === 'black' ? 'rgba(7, 14, 26, 0.72)' : `rgba(${getRgbFromColor(color)}, 0.18)`;
   }
 
   document.documentElement.style.setProperty('--chat-bg', color);
@@ -122,35 +145,35 @@ function changeChatboxTextColor(color) {
 }
 
 function resetChatboxStyle() {
-  const chatWindow = document.querySelector('.chat-window');
+  const chatWindow = document.querySelector('.chat-shell');
   if (chatWindow) {
     chatWindow.style.background = 'rgba(255, 255, 255, 0.96)';
   }
 
   const mainScroll = document.querySelector('.main-scroll');
   if (mainScroll) {
-    mainScroll.style.background = 'rgba(249, 251, 255, 0.5)';
+    mainScroll.style.background = 'linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%)';
   }
 
   const bubbles = document.querySelectorAll('.assistant .bubble');
   bubbles.forEach((bubble) => {
-    bubble.style.color = '#333';
+    bubble.style.color = '#1f2937';
   });
 
-  document.documentElement.style.setProperty('--chat-bg', 'rgba(249, 251, 255, 0.5)');
-  document.documentElement.style.setProperty('--chat-text', '#333');
+  document.documentElement.style.setProperty('--chat-bg', '#ffffff');
+  document.documentElement.style.setProperty('--chat-text', '#1f2937');
 }
 
 function getRgbFromColor(color) {
   const colorMap = {
-    black: '0,0,0',
+    black: '10,18,32',
     white: '255,255,255',
-    red: '255,0,0',
-    blue: '0,0,255',
-    green: '0,255,0',
-    yellow: '255,255,0',
-    purple: '128,0,128',
-    pink: '255,192,203'
+    red: '220,38,38',
+    blue: '37,99,235',
+    green: '22,163,74',
+    yellow: '245,158,11',
+    orange: '249,115,22',
+    gray: '107,114,128'
   };
   return colorMap[color] || '255,255,255';
 }
@@ -171,10 +194,17 @@ const sendMessage = async () => {
   messages.value.push(assistantMsg);
   await scrollToBottom();
 
+  if (!chatApiUrl) {
+    assistantMsg.thinking = false;
+    assistantMsg.content =
+      '当前页面已经部署在线，但没有配置 `VITE_API_BASE_URL`。如果后端还在本地 `localhost:8000`，线上页面无法直接访问，请把后端暴露为公网 HTTPS 地址后再配置环境变量。';
+    return;
+  }
+
   const finishAssistantMessage = (rawText) => {
     if (!rawText) {
       assistantMsg.thinking = false;
-      assistantMsg.content = '未收到后端返回内容，请检查接口返回格式。';
+      assistantMsg.content = '没有收到后端返回内容，请检查接口返回格式。';
       return;
     }
 
@@ -202,7 +232,10 @@ const sendMessage = async () => {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ''}`
+      );
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -255,7 +288,9 @@ const sendMessage = async () => {
     }
   } catch (error) {
     assistantMsg.thinking = false;
-    assistantMsg.content = `连接失败，请检查接口地址或后端返回格式。${error.message ? ` (${error.message})` : ''}`;
+    assistantMsg.content = `连接失败，请检查接口地址或后端返回格式。${
+      error.message ? ` (${error.message})` : ''
+    }`;
     console.error('Fetch Error:', error);
   }
 };
@@ -263,42 +298,70 @@ const sendMessage = async () => {
 
 <template>
   <div class="app-container">
-    <div class="bg-decoration top-left"></div>
-    <div class="bg-decoration bottom-right"></div>
+    <div class="bg-grid"></div>
+    <div class="bg-glow glow-left"></div>
+    <div class="bg-glow glow-right"></div>
 
-    <div class="inspiration-sidebar">
-      <div class="section-title">
-        <span class="icon">✨</span>
-        <span>探索灵感</span>
-      </div>
-      <div class="tag-cloud">
-        <div class="tag-card" @click="userInput = '推荐一个南昌适合看日落的地方'">南昌日落</div>
-        <div class="tag-card" @click="userInput = '武功山两天一夜攻略'">武功山攻略</div>
-        <div class="tag-card" @click="userInput = '景德镇陶瓷厂怎么玩？'">景德镇陶瓷</div>
-        <div class="tag-card" @click="userInput = '婺源现在油菜花开了吗？'">婺源花海</div>
-        <div class="tag-card" @click="userInput = '江西有哪些不累的避暑胜地？'">轻松避暑</div>
-      </div>
-    </div>
+    <aside class="service-panel">
+      <div class="panel-badge">After-Sales Support</div>
+      <h1>售后问答助手</h1>
+      <p class="panel-copy">
+        面向物流、退换货、保修、安装与发票问题的智能客服入口，让用户先得到清晰可执行的答案。
+      </p>
 
-    <div class="chat-window">
+      <div class="promise-list">
+        <div v-for="item in servicePromises" :key="item.label" class="promise-card">
+          <strong>{{ item.label }}</strong>
+          <span>{{ item.desc }}</span>
+        </div>
+      </div>
+
+      <div class="quick-card">
+        <div class="quick-header">
+          <span class="quick-dot"></span>
+          <span>常见售后问题</span>
+        </div>
+        <div class="quick-list">
+          <button
+            v-for="question in quickQuestions"
+            :key="question"
+            class="quick-item"
+            @click="userInput = question"
+          >
+            {{ question }}
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-shell">
       <header class="header">
         <div class="header-info">
-          <span class="status-dot"></span>
+          <div class="brand-mark">售后</div>
           <div class="title-group">
-            <strong class="main-title">智旅通 · 江西金牌向导</strong>
-            <span class="sub-title">基于实时气象与 RAG 的行程规划</span>
+            <strong class="main-title">智能售后服务台</strong>
+            <span class="sub-title">优先回答处理流程，再引导用户补充订单或设备信息</span>
           </div>
+        </div>
+        <div class="header-status">
+          <span class="status-dot"></span>
+          <span>在线响应中</span>
         </div>
       </header>
 
       <main ref="chatBody" class="main-scroll">
+        <div class="notice-strip">
+          支持的问题类型：物流进度、退换货申请、故障排查、保修政策、发票与人工客服转接
+        </div>
+
         <div v-for="(msg, i) in messages" :key="i" :class="['message-row', msg.role]">
           <div v-if="msg.role === 'assistant'" class="avatar assistant-avatar">AI</div>
 
           <div class="bubble-container">
+            <div class="role-label">{{ msg.role === 'assistant' ? '售后助手' : '用户' }}</div>
             <div class="bubble">
               <div v-if="msg.role === 'assistant' && msg.thinking" class="thinking-bubble">
-                <span>正在为你规划行程</span>
+                <span>正在整理售后处理建议</span>
                 <div class="dot-ani"></div>
                 <div class="dot-ani"></div>
                 <div class="dot-ani"></div>
@@ -308,7 +371,7 @@ const sendMessage = async () => {
 
               <div v-if="msg.uiData && msg.uiData.length > 0" class="ui-cards-wrapper">
                 <div v-for="(card, index) in msg.uiData" :key="index" class="card-item">
-                  <div v-if="card.type === 'scenery-card'" class="scenery-card">
+                  <div v-if="card.type === 'scenery-card'" class="service-card">
                     <div class="card-image">
                       <img :src="card.data.image" :alt="card.data.name" @load="scrollToBottom" />
                     </div>
@@ -333,249 +396,365 @@ const sendMessage = async () => {
         <div class="input-wrapper">
           <input
             v-model="userInput"
-            placeholder="输入目的地，开启你的江西之旅..."
+            placeholder="请输入你的售后问题，例如：耳机左边没有声音，怎么处理？"
             @keyup.enter="sendMessage"
           />
           <button class="send-btn" :disabled="!userInput.trim()" @click="sendMessage">发送</button>
         </div>
       </footer>
-    </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .app-container {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 28px;
+  padding: 28px;
   overflow: hidden;
-  background: #f0f4f8 linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
-  font-family: "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.22), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(249, 115, 22, 0.18), transparent 28%),
+    linear-gradient(135deg, #eaf1f8 0%, #f6f8fc 46%, #eef4fb 100%);
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-.bg-decoration {
+.bg-grid {
   position: absolute;
-  z-index: 0;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.3;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 88%);
   pointer-events: none;
 }
 
-.top-left {
-  top: -10%;
-  left: -5%;
-  width: 400px;
-  height: 400px;
-  background: #1890ff;
-}
-
-.bottom-right {
-  right: -5%;
-  bottom: -10%;
-  width: 500px;
-  height: 500px;
-  background: #52c41a;
-}
-
-.inspiration-sidebar {
+.bg-glow {
   position: absolute;
-  top: 20%;
-  left: 40px;
-  z-index: 10;
+  border-radius: 999px;
+  filter: blur(90px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.glow-left {
+  top: 8%;
+  left: -6%;
+  width: 260px;
+  height: 260px;
+  background: rgba(14, 165, 233, 0.3);
+}
+
+.glow-right {
+  right: -4%;
+  bottom: 12%;
+  width: 320px;
+  height: 320px;
+  background: rgba(249, 115, 22, 0.22);
+}
+
+.service-panel,
+.chat-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.service-panel {
   display: flex;
   flex-direction: column;
-  gap: 15px;
-  width: 200px;
+  gap: 20px;
+  padding: 30px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 28px;
+  background: rgba(9, 21, 38, 0.88);
+  color: #f8fafc;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(22px);
 }
 
-@media (max-width: 1150px) {
-  .inspiration-sidebar {
-    display: none;
-  }
+.panel-badge {
+  align-self: flex-start;
+  padding: 8px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.32);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #7dd3fc;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.section-title {
+.service-panel h1 {
+  margin: 0;
+  font-size: 36px;
+  line-height: 1.12;
+  letter-spacing: 0.02em;
+}
+
+.panel-copy {
+  color: rgba(226, 232, 240, 0.78);
+  line-height: 1.75;
+}
+
+.promise-list {
+  display: grid;
+  gap: 12px;
+}
+
+.promise-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.promise-card strong {
+  font-size: 15px;
+}
+
+.promise-card span {
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 13px;
+}
+
+.quick-card {
+  padding: 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+}
+
+.quick-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 5px;
-  font-size: 16px;
+  margin-bottom: 14px;
+  color: #e2e8f0;
+  font-size: 14px;
   font-weight: 600;
-  color: #2c3e50;
 }
 
-.tag-cloud {
-  display: flex;
-  flex-direction: column;
+.quick-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fb923c;
+  box-shadow: 0 0 10px rgba(251, 146, 60, 0.8);
+}
+
+.quick-list {
+  display: grid;
   gap: 10px;
 }
 
-.tag-card {
-  padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
-  color: #555;
+.quick-item {
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f8fafc;
+  text-align: left;
   cursor: pointer;
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    background 0.25s ease;
 }
 
-.tag-card:hover {
-  transform: translateX(10px);
-  border-color: #1890ff;
-  background: #fff;
-  box-shadow: 0 8px 15px rgba(24, 144, 255, 0.1);
-  color: #1890ff;
+.quick-item:hover {
+  transform: translateX(6px);
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(14, 165, 233, 0.12);
 }
 
-.chat-window {
-  position: relative;
-  z-index: 20;
+.chat-shell {
   display: flex;
   flex-direction: column;
-  width: 90%;
-  max-width: 850px;
-  height: 85vh;
+  min-width: 0;
+  height: calc(100vh - 56px);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 30px;
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
-  backdrop-filter: blur(20px);
+  box-shadow: 0 28px 80px rgba(30, 41, 59, 0.16);
+  backdrop-filter: blur(24px);
 }
 
 .header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   flex-shrink: 0;
-  height: 70px;
-  padding: 0 25px;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fff;
+  padding: 22px 26px;
+  border-bottom: 1px solid #e5edf5;
+  background:
+    linear-gradient(90deg, rgba(14, 165, 233, 0.08), transparent 42%),
+    linear-gradient(180deg, #ffffff, #fbfdff);
 }
 
 .header-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.22);
+}
+
+.title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.main-title {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sub-title {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .status-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #52c41a;
-  box-shadow: 0 0 8px #52c41a;
-}
-
-.title-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.main-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #333;
-}
-
-.sub-title {
-  font-size: 12px;
-  color: #999;
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.85);
 }
 
 .main-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 25px;
-  background: rgba(249, 251, 255, 0.5);
+  padding: 22px 24px 14px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%);
   scroll-behavior: smooth;
+}
+
+.notice-strip {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #33517a;
+  font-size: 13px;
 }
 
 .message-row {
   display: flex;
   align-items: flex-start;
-  margin-bottom: 20px;
-  animation: fadeIn 0.4s ease;
+  margin-bottom: 18px;
+  animation: fadeIn 0.36s ease;
 }
 
 .message-row.user {
   justify-content: flex-end;
 }
 
-.message-row.assistant {
-  justify-content: flex-start;
-}
-
 .avatar {
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: 600;
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .assistant-avatar {
   margin-right: 12px;
-  background: #e6f7ff;
+  background: linear-gradient(135deg, #dbeafe, #e0f2fe);
+  color: #1d4ed8;
 }
 
 .user-avatar {
   margin-left: 12px;
-  background: #f0f0f0;
+  background: linear-gradient(135deg, #fdeddc, #ffedd5);
+  color: #c2410c;
 }
 
 .bubble-container {
-  max-width: 75%;
+  max-width: min(78%, 760px);
+}
+
+.role-label {
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.message-row.user .role-label {
+  text-align: right;
 }
 
 .bubble {
-  padding: 12px 18px;
-  border-radius: 16px;
+  padding: 14px 18px;
+  border-radius: 18px;
   font-size: 15px;
-  line-height: 1.6;
-  word-wrap: break-word;
+  line-height: 1.7;
+  word-break: break-word;
 }
 
 .assistant .bubble {
-  border: 1px solid #ebedf0;
-  border-top-left-radius: 4px;
-  background: #fff;
-  color: #333;
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  border-top-left-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1f2937;
+  box-shadow: 0 12px 28px rgba(148, 163, 184, 0.12);
 }
 
 .user .bubble {
-  border-top-right-radius: 4px;
-  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.2);
+  border-top-right-radius: 6px;
+  background: linear-gradient(135deg, #1d4ed8 0%, #0ea5e9 100%);
   color: #fff;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.2);
 }
 
 .thinking-bubble {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #1890ff;
-  font-weight: 500;
+  color: #0f766e;
+  font-weight: 600;
 }
 
 .dot-ani {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #1890ff;
+  background: #0ea5e9;
   animation: dotFlash 1.4s infinite;
 }
 
@@ -588,23 +767,29 @@ const sendMessage = async () => {
 }
 
 .footer {
-  padding: 20px 25px;
-  border-top: 1px solid #f0f0f0;
-  background: #fff;
+  padding: 18px 24px 22px;
+  border-top: 1px solid #e5edf5;
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .input-wrapper {
   display: flex;
   align-items: center;
-  padding: 8px 8px 8px 20px;
-  border-radius: 30px;
-  background: #f4f5f7;
-  transition: all 0.3s;
+  gap: 12px;
+  padding: 10px 10px 10px 18px;
+  border: 1px solid #d8e2ef;
+  border-radius: 22px;
+  background: #f8fafc;
+  transition:
+    border-color 0.24s ease,
+    box-shadow 0.24s ease,
+    background 0.24s ease;
 }
 
 .input-wrapper:focus-within {
+  border-color: #7dd3fc;
   background: #fff;
-  box-shadow: 0 0 0 2px #1890ff;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.1);
 }
 
 input {
@@ -612,40 +797,48 @@ input {
   border: none;
   outline: none;
   background: transparent;
+  color: #0f172a;
   font-size: 15px;
-  color: #333;
+}
+
+input::placeholder {
+  color: #94a3b8;
 }
 
 .send-btn {
-  height: 40px;
+  height: 44px;
   padding: 0 22px;
   border: none;
-  border-radius: 20px;
-  background: #1890ff;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f97316, #ea580c);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
+  box-shadow: 0 12px 24px rgba(234, 88, 12, 0.24);
 }
 
 .send-btn:hover {
-  background: #40a9ff;
-  transform: scale(1.05);
+  transform: translateY(-1px);
 }
 
 .send-btn:disabled {
-  background: #bfbfbf;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
+  box-shadow: none;
 }
 
 .main-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .main-scroll::-webkit-scrollbar-thumb {
-  border-radius: 10px;
-  background: #e0e0e0;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.72);
 }
 
 .main-scroll::-webkit-scrollbar-track {
@@ -655,32 +848,24 @@ input {
 .ui-cards-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 14px;
   margin-top: 14px;
-  animation: cardSlideUp 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  animation: cardSlideUp 0.45s ease both;
 }
 
-.scenery-card {
-  max-width: 100%;
+.service-card {
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(203, 213, 225, 0.7);
   border-radius: 18px;
   background: #fff;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
-}
-
-.scenery-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 15px 35px rgba(24, 144, 255, 0.1);
+  box-shadow: 0 16px 30px rgba(148, 163, 184, 0.16);
 }
 
 .card-image {
-  position: relative;
   width: 100%;
   height: 190px;
   overflow: hidden;
-  background: #f0f2f5;
+  background: #e2e8f0;
 }
 
 .card-image img {
@@ -688,189 +873,140 @@ input {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.5s ease;
-}
-
-.scenery-card:hover .card-image img {
-  transform: scale(1.08);
 }
 
 .card-body {
   padding: 16px;
-  text-align: left;
 }
 
 .card-name {
   margin: 0 0 10px;
-  color: #262626;
+  color: #0f172a;
   font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
 }
 
 .card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .tag-item {
   padding: 4px 10px;
-  border: 1px solid #bae7ff;
-  border-radius: 6px;
-  background: #e6f7ff;
-  color: #1890ff;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
   font-size: 12px;
-  font-weight: 500;
 }
 
 .card-desc {
   margin: 0;
-  color: #595959;
+  color: #475569;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
-@media (max-width: 1024px) {
-  .chat-window {
-    width: 95%;
-    height: 90vh;
+@media (max-width: 1180px) {
+  .app-container {
+    grid-template-columns: 1fr;
+    padding: 18px;
   }
 
-  .bubble-container {
-    max-width: 85%;
+  .service-panel {
+    gap: 16px;
+    padding: 22px;
   }
 
-  .inspiration-sidebar {
-    left: 20px;
-    width: 180px;
+  .chat-shell {
+    height: auto;
+    min-height: calc(100vh - 280px);
   }
 }
 
 @media (max-width: 768px) {
-  .bg-decoration {
+  .app-container {
+    padding: 0;
+    gap: 0;
+    background: linear-gradient(180deg, #eff5fb 0%, #ffffff 100%);
+  }
+
+  .bg-grid,
+  .bg-glow {
     display: none;
   }
 
-  .app-container {
-    align-items: flex-start;
-    background: #fff;
-  }
-
-  .chat-window {
-    width: 100%;
-    max-width: none;
-    height: 100vh;
-    height: 100dvh;
+  .service-panel {
     border: none;
     border-radius: 0;
+    box-shadow: none;
+    padding: 20px 16px 16px;
+  }
+
+  .service-panel h1 {
+    font-size: 28px;
+  }
+
+  .chat-shell {
+    height: auto;
+    min-height: 0;
+    border: none;
+    border-radius: 24px 24px 0 0;
     box-shadow: none;
   }
 
   .header {
-    height: 60px;
-    padding: 0 15px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
+    padding: 18px 16px;
   }
 
-  .main-title {
-    font-size: 15px;
-  }
-
-  .sub-title {
-    font-size: 10px;
+  .header-status {
+    display: none;
   }
 
   .main-scroll {
     padding: 16px;
   }
 
-  .avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 12px;
-  }
-
-  .bubble {
-    padding: 8px 12px;
-    font-size: 14px;
-  }
-
   .bubble-container {
-    max-width: 90%;
+    max-width: 88%;
   }
 
   .footer {
-    padding: 10px 15px env(safe-area-inset-bottom);
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
   }
 
   .input-wrapper {
-    padding: 4px 4px 4px 16px;
-  }
-
-  input {
-    font-size: 12px;
-  }
-
-  .send-btn {
-    height: 36px;
-    padding: 0 16px;
-    font-size: 14px;
-  }
-
-  .tag-card {
-    padding: 8px 12px;
-    font-size: 12px;
-  }
-
-  .card-image {
-    height: 150px;
-  }
-
-  .card-name {
-    font-size: 16px;
-  }
-
-  .card-desc {
-    font-size: 13px;
+    padding-left: 14px;
   }
 }
 
 @media (max-width: 480px) {
-  .bubble-container {
-    max-width: 95%;
+  .promise-list {
+    gap: 10px;
   }
 
-  .message-row {
-    margin-bottom: 12px;
+  .quick-item,
+  .notice-strip,
+  .bubble,
+  input,
+  .send-btn {
+    font-size: 14px;
   }
 
   .avatar {
-    width: 28px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
   }
 
-  .bubble {
-    padding: 6px 10px;
-    font-size: 13px;
-  }
-
-  .tag-card {
-    padding: 6px 10px;
-    font-size: 11px;
-  }
-
-  input {
-    font-size: 11px;
+  .bubble-container {
+    max-width: 92%;
   }
 }
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(6px);
   }
 
   to {
@@ -882,7 +1018,7 @@ input {
 @keyframes dotFlash {
   0%,
   100% {
-    opacity: 0.2;
+    opacity: 0.25;
   }
 
   50% {
@@ -893,7 +1029,7 @@ input {
 @keyframes cardSlideUp {
   from {
     opacity: 0;
-    transform: translateY(15px);
+    transform: translateY(14px);
   }
 
   to {
