@@ -5,16 +5,13 @@ import MarkdownIt from 'markdown-it';
 const md = new MarkdownIt();
 const chatBody = ref(null);
 
+const fallbackPublicApiBaseUrl = 'https://stove-clone-hurray.ngrok-free.dev';
 const rawApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
-const normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/$/, '');
+const resolvedApiBaseUrl = (rawApiBaseUrl || fallbackPublicApiBaseUrl).replace(/\/$/, '');
 const isBrowser = typeof window !== 'undefined';
 const isLocalPreview =
   !isBrowser || ['localhost', '127.0.0.1'].includes(window.location.hostname);
-const chatApiUrl = normalizedApiBaseUrl
-  ? `${normalizedApiBaseUrl}/chat`
-  : isLocalPreview
-    ? '/api/chat'
-    : '';
+const chatApiUrl = isLocalPreview && !rawApiBaseUrl ? '/api/chat' : `${resolvedApiBaseUrl}/chat`;
 
 const quickQuestions = [
   '我的订单还没收到，怎么查询物流进度？',
@@ -193,13 +190,6 @@ const sendMessage = async () => {
   });
   messages.value.push(assistantMsg);
   await scrollToBottom();
-
-  if (!chatApiUrl) {
-    assistantMsg.thinking = false;
-    assistantMsg.content =
-      '当前页面已经部署在线，但没有配置 `VITE_API_BASE_URL`。如果后端还在本地 `localhost:8000`，线上页面无法直接访问，请把后端暴露为公网 HTTPS 地址后再配置环境变量。';
-    return;
-  }
 
   const finishAssistantMessage = (rawText) => {
     if (!rawText) {
