@@ -32,7 +32,7 @@ const messages = ref([
   {
     role: 'assistant',
     content:
-      '你好，我是售后问答助手，可以帮你处理物流查询、退换货、保修说明、故障排查和发票问题。请直接描述你遇到的情况。',
+      '你好，我是售后问答助手，可以帮你处理故障排查问题请直接描述你遇到的情况。',
     thinking: false,
     uiData: null
   }
@@ -916,8 +916,13 @@ input::placeholder {
 
 @media (max-width: 768px) {
   .app-container {
+    position: relative;
+    inset: auto;
+    min-height: 100dvh;
+    height: auto;
     padding: 0;
     gap: 0;
+    overflow-y: auto;
     background: linear-gradient(180deg, #eff5fb 0%, #ffffff 100%);
   }
 
@@ -933,6 +938,14 @@ input::placeholder {
     padding: 20px 16px 16px;
   }
 
+  .quick-card {
+    padding: 14px;
+  }
+
+  .quick-list {
+    grid-template-columns: 1fr;
+  }
+
   .service-panel h1 {
     font-size: 28px;
   }
@@ -940,6 +953,7 @@ input::placeholder {
   .chat-shell {
     height: auto;
     min-height: 0;
+    flex: 1;
     border: none;
     border-radius: 24px 24px 0 0;
     box-shadow: none;
@@ -954,6 +968,7 @@ input::placeholder {
   }
 
   .main-scroll {
+    min-height: 50dvh;
     padding: 16px;
   }
 
@@ -971,6 +986,23 @@ input::placeholder {
 }
 
 @media (max-width: 480px) {
+  .service-panel {
+    padding: 16px 14px 12px;
+  }
+
+  .service-panel h1 {
+    font-size: 24px;
+  }
+
+  .panel-copy {
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  .promise-card {
+    padding: 14px;
+  }
+
   .promise-list {
     gap: 10px;
   }
@@ -990,6 +1022,10 @@ input::placeholder {
 
   .bubble-container {
     max-width: 92%;
+  }
+
+  .main-scroll {
+    min-height: 56dvh;
   }
 }
 

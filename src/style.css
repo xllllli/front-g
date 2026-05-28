@@ -26,6 +26,12 @@ body {
   overflow: hidden;
 }
 
+@media (max-width: 768px) {
+  body {
+    overflow: auto;
+  }
+}
+
 button,
 input {
   font: inherit;
